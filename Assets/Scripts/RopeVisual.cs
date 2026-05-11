@@ -1,33 +1,27 @@
+using Unity.Netcode;
 using UnityEngine;
 
 public class RopeVisual : MonoBehaviour
 {
-    private GameObject player1;
-    private GameObject player2;
+    // Distancia desde el centro hasta cada jugador (debe coincidir con TugOfWarLogic)
+    private const float PLAYER_OFFSET = 5f;
+
+    // Offset visual en X por si el sprite de la soga no tiene el pivot centrado
+    [SerializeField] private float visualOffsetX = 0f;
 
     void Update()
     {
-        // 1. Buscamos a los jugadores si aún no los tenemos
-        if (player1 == null || player2 == null)
-        {
-            GameObject[] players = GameObject.FindGameObjectsWithTag("Player");
-            if (players.Length >= 2)
-            {
-                player1 = players[0];
-                player2 = players[1];
-            }
-            return; // Esperamos al siguiente frame si aún no están los dos
-        }
+        if (TugOfWarLogic.HostInstance == null) return;
 
-        // 2. Posicionamos la soga justo en el medio de los dos
-        Vector3 pos1 = player1.transform.position;
-        Vector3 pos2 = player2.transform.position;
-        transform.position = (pos1 + pos2) / 2;
+        float ropeX = TugOfWarLogic.HostInstance.ropePosition.Value;
 
-        // 3. Calculamos la distancia para estirarla
-        float distancia = Vector3.Distance(pos1, pos2);
+        // Mover solo X, mantener Y y Z originales
+        transform.position = new Vector3(ropeX + visualOffsetX, transform.position.y, transform.position.z);
 
-        // 4. Aplicamos la escala (Ajusta el 0.1f si tu soga es muy gorda o flaca)
-        transform.localScale = new Vector3(distancia, 0.1f, 1f);
+        // Escalar para cubrir la distancia entre jugadores
+        float distancia = PLAYER_OFFSET * 2f;
+        transform.localScale = new Vector3(distancia, transform.localScale.y, transform.localScale.z);
+
+        transform.rotation = Quaternion.identity;
     }
 }

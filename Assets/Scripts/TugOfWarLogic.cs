@@ -4,43 +4,99 @@ using UnityEngine.InputSystem;
 
 public class TugOfWarLogic : NetworkBehaviour
 {
+    // Referencia estatica al host, para que RopeVisual la lea
+    public static TugOfWarLogic HostInstance;
+
+    // Posicion compartida de la soga (eje X), sincronizada por el servidor
+    public NetworkVariable<float> ropePosition = new NetworkVariable<float>(
+        0f,
+        NetworkVariableReadPermission.Everyone,
+        NetworkVariableWritePermission.Server
+    );
+
+    // Limites: si la soga llega a -5 gana el cliente, si llega a +5 gana el host
+    private const float WIN_LIMIT = 5f;  // La soga empieza en 0, si llega a +5 arrastra al host al centro, si llega a -5 arrastra al cliente
+
+    private bool gameOver = false;
+
     public override void OnNetworkSpawn()
     {
         SpriteRenderer sr = GetComponent<SpriteRenderer>();
 
-        if (IsServer) // El Host siempre es el Servidor
+        // El jugador con clientId=0 es siempre el host
+        bool iAmHost = OwnerClientId == 0;
+
+        if (iAmHost)
         {
             sr.color = Color.blue;
-            // Solo movemos si somos el dueño
-            if (IsOwner) transform.position = new Vector3(-7, 0, 0);
+            transform.position = new Vector3(-5f, transform.position.y, 0f);
+            HostInstance = this;
         }
-        else // El que se une es el Cliente
+        else
         {
             sr.color = Color.red;
-            if (IsOwner) transform.position = new Vector3(7, 0, 0);
+            transform.position = new Vector3(5f, transform.position.y, 0f);
         }
+
+        // Aplicar posicion inicial segun el valor actual de ropePosition
+        float myOffset = iAmHost ? -5f : 5f;
+        transform.position = new Vector3(ropePosition.Value + myOffset, transform.position.y, 0f);
+
+        // Todos escuchan el cambio para mover su propio transform
+        ropePosition.OnValueChanged += OnRopePositionChanged;
+    }
+
+    public override void OnNetworkDespawn()
+    {
+        ropePosition.OnValueChanged -= OnRopePositionChanged;
+        if (IsHost) HostInstance = null;
+    }
+
+    // Cuando la soga se mueve, cada jugador actualiza SU PROPIA posicion
+    private void OnRopePositionChanged(float oldVal, float newVal)
+    {
+        bool iAmHost = OwnerClientId == 0;
+        float myOffset = iAmHost ? -5f : 5f;
+        transform.position = new Vector3(newVal + myOffset, transform.position.y, 0f);
     }
 
     void Update()
     {
+        if (gameOver) return;
         if (!IsOwner) return;
 
-        // Si presionas Espacio, pides al servidor que te mueva
         if (Keyboard.current.spaceKey.wasPressedThisFrame)
         {
-            MoveRequestServerRpc();
+            bool iAmHost = OwnerClientId == 0;
+            PullServerRpc(iAmHost);
         }
     }
 
-    [ServerRpc] // Esto viaja por el Relay hasta el Host
-    void MoveRequestServerRpc()
+    [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
+    void PullServerRpc(bool callerIsHost)
     {
-        // El Host jala hacia -infinito, el Cliente hacia +infinito
-        float moveDir = IsHost ? -0.5f : 0.5f;
-        transform.position += new Vector3(moveDir, 0, 0);
+        if (gameOver) return;
 
-        // Verificar si cruzaste la meta (X=0)
-        if (IsHost && transform.position.x > 0) Debug.Log("GANÓ EL HOST");
-        if (!IsHost && transform.position.x < 0) Debug.Log("GANÓ EL CLIENTE");
+        float pull = callerIsHost ? -0.5f : 0.5f;
+        ropePosition.Value += pull;
+
+        if (ropePosition.Value >= WIN_LIMIT)
+        {
+            gameOver = true;
+            AnnounceWinnerClientRpc("CLIENTE");
+        }
+        else if (ropePosition.Value <= -WIN_LIMIT)
+        {
+            gameOver = true;
+            AnnounceWinnerClientRpc("HOST");
+        }
+    }
+
+    [ClientRpc]
+    void AnnounceWinnerClientRpc(string winner)
+    {
+        gameOver = true;
+        Debug.Log($"¡GANÓ EL {winner}!");
+        // Aqui puedes mostrar un panel de victoria en la UI
     }
 }
