@@ -24,12 +24,10 @@ public class RelayControl : MonoBehaviour
 
         await UnityServices.InitializeAsync();
 
-        // Evitar re-iniciar sesion si ya estamos autenticados
         if (!AuthenticationService.Instance.IsSignedIn)
             await AuthenticationService.Instance.SignInAnonymouslyAsync();
     }
 
-    // Boton HOST
     public async void StartRelayHost()
     {
         panelInicio.SetActive(false);
@@ -38,7 +36,6 @@ public class RelayControl : MonoBehaviour
 
         try
         {
-            // maxConnections = 1 (solo 1 cliente se une al host)
             Allocation allocation = await RelayService.Instance.CreateAllocationAsync(1);
             string joinCode = await RelayService.Instance.GetJoinCodeAsync(allocation.AllocationId);
             codeText.text = joinCode;
@@ -53,6 +50,9 @@ public class RelayControl : MonoBehaviour
             );
 
             NetworkManager.Singleton.StartHost();
+
+            // Ocultar panel cuando el cliente se una
+            NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
         }
         catch (RelayServiceException e)
         {
@@ -61,14 +61,19 @@ public class RelayControl : MonoBehaviour
         }
     }
 
-    // Boton JOIN (va al panel donde se escribe el codigo)
+    private void OnClientConnected(ulong clientId)
+    {
+        if (clientId == 0) return; // ignorar el host mismo
+        panelHost.SetActive(false);
+        NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
+    }
+
     public void UI_IrAPanelJoin()
     {
         panelInicio.SetActive(false);
         panelJoin.SetActive(true);
     }
 
-    // Boton CONECTAR dentro del panel Join
     public async void ConfirmarUnionClient()
     {
         string code = inputField.text.Trim();
@@ -94,7 +99,6 @@ public class RelayControl : MonoBehaviour
 
             NetworkManager.Singleton.StartClient();
             panelJoin.SetActive(false);
-            panelHost.SetActive(false);
         }
         catch (RelayServiceException e)
         {

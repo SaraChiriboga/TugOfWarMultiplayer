@@ -1,11 +1,15 @@
 using Unity.Netcode;
 using UnityEngine;
+using TMPro;
 
-// Este objeto debe existir en la escena con un NetworkObject adjunto
-// NO es spawneado dinamicamente, ya esta en la escena
 public class GameManager : NetworkBehaviour
 {
     public static GameManager Instance;
+
+    [Header("UI")]
+    public GameObject panelVictoria;
+    public TextMeshProUGUI textoGanador;
+    public GameObject botonRevancha; // solo visible cuando ambos pidieron revancha o el host la inicia
 
     public NetworkVariable<float> ropePosition = new NetworkVariable<float>(
         0f,
@@ -13,38 +17,100 @@ public class GameManager : NetworkBehaviour
         NetworkVariableWritePermission.Server
     );
 
+    // Cuantos jugadores pidieron revancha (0, 1 o 2)
+    private NetworkVariable<int> revanchaVotos = new NetworkVariable<int>(
+        0,
+        NetworkVariableReadPermission.Everyone,
+        NetworkVariableWritePermission.Server
+    );
+
     private const float WIN_LIMIT = 5f;
-    private bool gameOver = false;
+
+    // gameOver como NetworkVariable para que ambos lados lo sepan
+    private NetworkVariable<bool> gameOver = new NetworkVariable<bool>(
+        false,
+        NetworkVariableReadPermission.Everyone,
+        NetworkVariableWritePermission.Server
+    );
 
     private void Awake()
     {
         Instance = this;
     }
 
-    // Llamado por PlayerController cuando el jugador presiona espacio
+    public override void OnNetworkSpawn()
+    {
+        // Escuchar cambios para mostrar/ocultar panel de revancha
+        revanchaVotos.OnValueChanged += OnRevanchaVotosChanged;
+
+        if (panelVictoria != null) panelVictoria.SetActive(false);
+    }
+
+    public override void OnNetworkDespawn()
+    {
+        revanchaVotos.OnValueChanged -= OnRevanchaVotosChanged;
+    }
+
     [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
     public void PullServerRpc(bool callerIsHost)
     {
-        if (gameOver) return;
+        if (gameOver.Value) return;
 
         ropePosition.Value += callerIsHost ? -0.5f : 0.5f;
 
         if (ropePosition.Value >= WIN_LIMIT)
         {
-            gameOver = true;
-            AnnounceWinnerClientRpc("CLIENTE");
+            gameOver.Value = true;
+            MostrarGanadorClientRpc("CLIENTE");
         }
         else if (ropePosition.Value <= -WIN_LIMIT)
         {
-            gameOver = true;
-            AnnounceWinnerClientRpc("HOST");
+            gameOver.Value = true;
+            MostrarGanadorClientRpc("HOST");
         }
     }
 
     [ClientRpc]
-    void AnnounceWinnerClientRpc(string winner)
+    void MostrarGanadorClientRpc(string winner)
     {
-        gameOver = true;
+        if (panelVictoria != null) panelVictoria.SetActive(true);
+        if (textoGanador != null) textoGanador.text = $"GANO EL {winner}!";
+        if (botonRevancha != null) botonRevancha.SetActive(true);
         Debug.Log($"GANO EL {winner}!");
+    }
+
+    // Llamado por el boton de revancha en la UI
+    public void PedirRevancha()
+    {
+        PedirRevanchaServerRpc();
+    }
+
+    [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
+    void PedirRevanchaServerRpc()
+    {
+        revanchaVotos.Value += 1;
+
+        // Si los dos jugadores pidieron revancha, reiniciar
+        if (revanchaVotos.Value >= 2)
+        {
+            ReiniciarJuegoClientRpc();
+            ropePosition.Value = 0f;
+            gameOver.Value = false;
+            revanchaVotos.Value = 0;
+        }
+    }
+
+    private void OnRevanchaVotosChanged(int oldVal, int newVal)
+    {
+        // Mostrar cuantos quieren revancha (opcional)
+        if (textoGanador != null && newVal == 1)
+            textoGanador.text += "\n(1/2 quiere revancha)";
+    }
+
+    [ClientRpc]
+    void ReiniciarJuegoClientRpc()
+    {
+        if (panelVictoria != null) panelVictoria.SetActive(false);
+        if (botonRevancha != null) botonRevancha.SetActive(false);
     }
 }
